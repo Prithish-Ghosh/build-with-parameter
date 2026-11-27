@@ -37,7 +37,7 @@ jobs:
             --load .
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
 
-      - uses: aquasecurity/setup-trivy@v0.2.3
+      - uses: aquasecurity/setup-trivy@v0.2.6
 
       - id: date
         run: echo "d=$(date +%F)" >> "$GITHUB_OUTPUT"
