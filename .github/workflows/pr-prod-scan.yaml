@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SCANNER_WHL: https://github.com/Prithish-Ghosh/org-ecr-scanner-dist/releases/download/v0.3.0/org_ecr_trivy_scanner-0.3.0-py3-none-any.whl
+  SCANNER_WHL: https://github.com/Prithish-Ghosh/org-ecr-scanner-dist/releases/download/v0.2.1/org_ecr_trivy_scanner-0.3.0-py3-none-any.whl
 
 jobs:
   build-and-scan:
@@ -37,7 +37,7 @@ jobs:
             --load .
           echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
 
-      - uses: aquasecurity/setup-trivy@v0.2.3
+      - uses: aquasecurity/setup-trivy@v0.2.6
 
       - id: date
         run: echo "d=$(date +%F)" >> "$GITHUB_OUTPUT"
@@ -98,3 +98,16 @@ jobs:
           DESC="Scan $([ "$SCAN" = success ] && echo clean || echo 'HAS findings') - review artifacts, then run the 'Security approval (manual)' workflow"
           gh api repos/$GITHUB_REPOSITORY/statuses/${{ github.event.pull_request.head.sha }} \
             -f state=pending -f context=security/approval -f description="$DESC"
+
+  # Pauses here until a required reviewer approves the 'security-approval' environment.
+  # always() so it still waits for review when the scan job failed on findings.
+  after-approval:
+    needs: build-and-scan
+    if: always() && needs.build-and-scan.result != 'skipped'
+    runs-on: ubuntu-24.04-arm
+    environment: security-approval
+    steps:
+      - name: Continue after security approval
+        run: |
+          echo "Approved by reviewer. Scan result was: ${{ needs.build-and-scan.result }}"
+          echo "Place post-approval steps here (e.g. push image, trigger deploy)."
