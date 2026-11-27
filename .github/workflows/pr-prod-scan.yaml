@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SCANNER_WHL: https://github.com/Prithish-Ghosh/org-ecr-scanner-dist/releases/download/v0.3.0/org_ecr_trivy_scanner-0.3.0-py3-none-any.whl
+  SCANNER_WHL: https://github.com/Prithish-Ghosh/org-ecr-scanner-dist/releases/download/v0.2.1/org_ecr_trivy_scanner-0.3.0-py3-none-any.whl
 
 jobs:
   build-and-scan:
