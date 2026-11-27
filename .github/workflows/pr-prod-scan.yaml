@@ -1,0 +1,100 @@
+name: PR to main - scan and approval
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: main-scan-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  SCANNER_WHL: https://github.com/Prithish-Ghosh/org-ecr-scanner-dist/releases/download/v0.3.0/org_ecr_trivy_scanner-0.3.0-py3-none-any.whl
+
+jobs:
+  build-and-scan:
+    if: github.head_ref == 'hotfix/devops/prod'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      statuses: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image (local, not pushed)
+        id: build
+        run: |
+          IMAGE="poc-image:pr-${{ github.event.pull_request.number }}-${GITHUB_SHA::7}"
+          docker buildx build \
+            --platform linux/arm64 \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            -t "${IMAGE}" \
+            --load .
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - uses: aquasecurity/setup-trivy@v0.2.3
+
+      - id: date
+        run: echo "d=$(date +%F)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ steps.date.outputs.d }}
+          restore-keys: trivy-db-
+
+      - name: Install org scanner
+        run: |
+          pipx install --force "$SCANNER_WHL"
+          scan --version
+
+      - name: Scan image
+        id: scan
+        run: |
+          mkdir -p reports
+          trivy image --scanners vuln --format json \
+            --output reports/trivy-results.json \
+            "${{ steps.build.outputs.image }}"
+          scan --from-json reports/trivy-results.json \
+            --image "${{ steps.build.outputs.image }}" \
+            --output-dir ./reports
+          # gate: fail if any HIGH/CRITICAL vulnerabilities
+          COUNT=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH" or .Severity=="CRITICAL")] | length' reports/trivy-results.json)
+          echo "HIGH/CRITICAL findings: $COUNT"
+          [ "$COUNT" -eq 0 ]
+
+      - name: Findings summary for reviewer
+        if: always() && steps.scan.outcome != 'skipped'
+        run: |
+          {
+            echo "## Image scan: ${{ steps.scan.outcome == 'success' && 'no HIGH/CRITICAL findings' || 'HIGH/CRITICAL findings present (or scan error, check the scan step log)' }}"
+            for f in $(find reports -name 'trivy-results.json'); do
+              echo "### $f"
+              jq -r '[.Results[]?.Vulnerabilities[]?.Severity] | group_by(.) | map("- \(.[0]): \(length)") | .[]' "$f"
+            done
+            echo ""
+            echo "Download the full HTML/PDF reports from the run's **Artifacts**."
+            echo "To release this PR: **Actions -> Security approval (manual) -> Run workflow**."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.scan.outcome != 'skipped'
+        with:
+          name: trivy-reports-pr-${{ github.event.pull_request.number }}
+          path: reports/
+          retention-days: 7
+
+      - name: Mark approval pending
+        if: always() && steps.scan.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SCAN: ${{ steps.scan.outcome }}
+        run: |
+          DESC="Scan $([ "$SCAN" = success ] && echo clean || echo 'HAS findings') - review artifacts, then run the 'Security approval (manual)' workflow"
+          gh api repos/$GITHUB_REPOSITORY/statuses/${{ github.event.pull_request.head.sha }} \
+            -f state=pending -f context=security/approval -f description="$DESC"

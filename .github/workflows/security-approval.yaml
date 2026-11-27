@@ -1,0 +1,34 @@
+name: Security approval (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to approve
+        required: true
+      decision:
+        description: Approve or reject
+        type: choice
+        options: [approve, reject]
+        default: approve
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set security/approval status on PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+          DECISION: ${{ inputs.decision }}
+        run: |
+          SHA=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR --jq .head.sha)
+          if [ "$DECISION" = approve ]; then STATE=success; else STATE=failure; fi
+          gh api repos/$GITHUB_REPOSITORY/statuses/$SHA \
+            -f state=$STATE -f context=security/approval \
+            -f description="Manual security review: $DECISION by $GITHUB_ACTOR"
