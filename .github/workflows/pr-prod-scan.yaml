@@ -98,3 +98,16 @@ jobs:
           DESC="Scan $([ "$SCAN" = success ] && echo clean || echo 'HAS findings') - review artifacts, then run the 'Security approval (manual)' workflow"
           gh api repos/$GITHUB_REPOSITORY/statuses/${{ github.event.pull_request.head.sha }} \
             -f state=pending -f context=security/approval -f description="$DESC"
+
+  # Pauses here until a required reviewer approves the 'security-approval' environment.
+  # always() so it still waits for review when the scan job failed on findings.
+  after-approval:
+    needs: build-and-scan
+    if: always() && needs.build-and-scan.result != 'skipped'
+    runs-on: ubuntu-24.04-arm
+    environment: security-approval
+    steps:
+      - name: Continue after security approval
+        run: |
+          echo "Approved by reviewer. Scan result was: ${{ needs.build-and-scan.result }}"
+          echo "Place post-approval steps here (e.g. push image, trigger deploy)."
